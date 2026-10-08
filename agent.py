@@ -1,6 +1,6 @@
 
 """
-The FitFindr planning loop.
+FitFindr planning loop — Unit 4.
 
 The agent:
 1. Parses the user's query.
@@ -9,6 +9,8 @@ The agent:
 4. Selects the best result.
 5. Suggests an outfit.
 6. Creates a fit card.
+
+Each step is recorded in a trace for debugging and evaluation.
 """
 
 import re
@@ -24,9 +26,7 @@ from generate import ModelUnavailable
 # ── session state ─────────────────────────────────────────────────────────────
 
 def new_session(query: str, wardrobe: dict) -> dict:
-    """
-    Create a new session for one FitFindr interaction.
-    """
+    """Create a new session for one FitFindr interaction."""
 
     return {
         "query": query,
@@ -43,12 +43,7 @@ def new_session(query: str, wardrobe: dict) -> dict:
 # ── query parsing ─────────────────────────────────────────────────────────────
 
 def parse_query(query: str) -> dict:
-    """
-    Parse the user's query into:
-    - description
-    - size
-    - max_price
-    """
+    """Extract description, size, and maximum price from the query."""
 
     description = query.strip()
     size = None
@@ -106,74 +101,130 @@ def parse_query(query: str) -> dict:
 # ── planning loop ─────────────────────────────────────────────────────────────
 
 def run_agent(query: str, wardrobe: dict) -> dict:
-    """
-    Run the FitFindr planning loop and return the completed session.
-    """
+    """Run the FitFindr agent and record its decisions."""
+
+    trace.start_trace()
 
     session = new_session(query, wardrobe)
-
     iteration_count = 0
 
-    # ── Step 1: Parse query ────────────────────────────────────────────────
-
+    # Step 1: Parse query
     iteration_count += 1
     trace.check_iterations(iteration_count)
 
     session["parsed"] = parse_query(session["query"])
 
+    trace.step(
+        "parse_query",
+        inputs={"query": session["query"]},
+        returned=session["parsed"],
+    )
+
     description = session["parsed"]["description"]
     size = session["parsed"]["size"]
     max_price = session["parsed"]["max_price"]
 
-    # ── Step 2: Search listings through MCP ────────────────────────────────
-
+    # Step 2: Search listings via MCP
     iteration_count += 1
     trace.check_iterations(iteration_count)
 
+    search_inputs = {
+        "description": description,
+        "size": size,
+        "max_price": max_price,
+    }
+
     session["search_results"] = call_tool(
         "search_listings",
-        {
-            "description": description,
-            "size": size,
-            "max_price": max_price,
-        },
+        search_inputs,
     )
 
-    # ── BRANCH: Stop if nothing matched ────────────────────────────────────
+    trace.step(
+        "search_listings (via MCP)",
+        inputs=search_inputs,
+        returned=session["search_results"],
+    )
 
+    # Branch: stop when no results are found
     if not session["search_results"]:
         session["error"] = (
             "I couldn't find a matching item. Try increasing your budget, "
             "changing the size, or using a broader item description."
         )
+
+        trace.step(
+            "empty_search_branch",
+            inputs={"results_count": 0},
+            returned=session["error"],
+            note="No matching listings; stopping before outfit and fit card.",
+        )
+
         return session
 
-    # ── Step 3: Select first/best result ───────────────────────────────────
-
+    # Step 3: Select the best result
     iteration_count += 1
     trace.check_iterations(iteration_count)
 
     session["selected_item"] = session["search_results"][0]
 
-    # ── Step 4: Suggest outfit ─────────────────────────────────────────────
+    trace.step(
+        "select_best_item",
+        inputs=session["search_results"],
+        returned=session["selected_item"],
+    )
 
+    # Step 4: Suggest outfit
     iteration_count += 1
     trace.check_iterations(iteration_count)
 
-    session["outfit_suggestion"] = suggest_outfit(
-        session["selected_item"],
-        session["wardrobe"],
-    )
+    outfit_inputs = {
+        "new_item": session["selected_item"],
+        "wardrobe": session["wardrobe"],
+    }
 
-    # ── Step 5: Create fit card ────────────────────────────────────────────
+    try:
+        session["outfit_suggestion"] = suggest_outfit(
+            session["selected_item"],
+            session["wardrobe"],
+        )
 
-    iteration_count += 1
-    trace.check_iterations(iteration_count)
+        trace.step(
+            "suggest_outfit",
+            inputs=outfit_inputs,
+            returned=session["outfit_suggestion"],
+        )
 
-    session["fit_card"] = create_fit_card(
-        session["outfit_suggestion"],
-        session["selected_item"],
-    )
+        # Step 5: Create fit card
+        iteration_count += 1
+        trace.check_iterations(iteration_count)
+
+        fit_card_inputs = {
+            "outfit": session["outfit_suggestion"],
+            "new_item": session["selected_item"],
+        }
+
+        session["fit_card"] = create_fit_card(
+            session["outfit_suggestion"],
+            session["selected_item"],
+        )
+
+        trace.step(
+            "create_fit_card",
+            inputs=fit_card_inputs,
+            returned=session["fit_card"],
+        )
+
+    except ModelUnavailable as exc:
+        session["error"] = (
+            f"The styling model is unavailable: {exc} "
+            "Please check your API key or internet connection and try again."
+        )
+
+        trace.step(
+            "model_unavailable",
+            returned=session["error"],
+            note="Model request failed; stopping the agent.",
+        )
 
     return session
 
@@ -186,7 +237,7 @@ def _show(session: dict) -> None:
         print(f"  stopped: {session['error']}")
         print(
             f"  fit_card is {session['fit_card']!r} "
-            "— it should still be None here"
+            "— it should still be None here if generation stopped"
         )
         return
 

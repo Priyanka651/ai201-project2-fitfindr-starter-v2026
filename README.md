@@ -245,17 +245,52 @@ that produced it:
 
 ---
 
-## Loop Trace
 
-<!-- One full run, printed step by step, with the MCP call visible in it.
+### Loop Trace
 
-     `python app.py ask '...' --trace` once you've added the trace.step()
-     calls in Milestone 2.
+Command used:
 
-     Worth pasting BOTH the happy path and the empty-search path. The empty
-     one should be visibly shorter, because it stops. If your two traces are
-     the same length, your branch isn't working — and this is the fastest way
-     anyone will ever find that out. -->
+```bash
+python app.py ask 'vintage graphic tee under $30' --trace
+```
+
+Actual trace output:
+
+```text
+[1] parse_query
+      in:  dict with keys: query
+      out: dict with keys: description, size, max_price
+[2] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 10 items: Y2K Baby Tee — Butterfly Print, Graphic Tee — 2003 Tour Bootleg Style, Vintage Band Tee — Faded Grey … +7 more
+[3] select_best_item
+      in:  10 items: Y2K Baby Tee — Butterfly Print, Graphic Tee — 2003 Tour Bootleg Style, Vintage Band Tee — Faded Grey … +7 more
+      out: Y2K Baby Tee — Butterfly Print ($18.0, depop)
+[4] suggest_outfit
+      in:  dict with keys: new_item, wardrobe
+      out: Here are two easy outfits you can make using your new Y2K baby tee and items you already own:  **Outfit 1: Cas…
+[5] create_fit_card
+      in:  dict with keys: outfit, new_item
+      out: Scored this adorable Y2K butterfly baby tee on Depop for just $18, and I'm obsessed! It’s giving the ultimate …
+```
+
+**Observations:**
+
+- The agent parsed the user query and extracted the clothing description and maximum price.
+- `search_listings` was called through MCP and returned 10 matching listings.
+- The agent selected the first listing, a Y2K Baby Tee priced at $18.
+- `suggest_outfit` generated outfit recommendations using the selected item and wardrobe.
+- `create_fit_card` generated a social-media-style caption.
+- The agent completed the workflow without errors. Both model responses were served from cache during this trace run.
+
+### Failure Handling Tests
+
+| Scenario | Result | Observation |
+|---|---|---|
+| Empty search | PASS | The agent returned a helpful no-results message and stopped before generating a fit card. |
+| Empty wardrobe | PASS | The agent generated outfit suggestions without requiring existing wardrobe items. |
+| Model unavailable | PASS | With an intentionally invalid API key and caching disabled, the application displayed a readable `ModelUnavailable` error explaining how to fix the key. |
+
 
 **Happy path**
 
